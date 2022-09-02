@@ -50,3 +50,16 @@ def delete_same_commit(arr):
         if len(temp) != 0:
             commit_arr.append({'pr': edge['pr'], 'committer': edge['committer'], 'weight': weight / len(temp)})
     return commit_arr
+
+
+def Txt2Csv(Txt_path, Csv_path):
+    with open(Txt_path, encoding='utf-8') as f:
+        contents = []
+        lines = f.readlines()  # lines是一个列表
+        for i in lines:
+            line = i.strip().split(",")  # 去掉前后的换行符，之后按逗号分割开
+            contents.append(line)  # contents二维列表
+    df = pd.DataFrame(contents)
+    df.to_csv(Csv_path, header=False)           # 不添加表头
+    print("数据写入成功")
+

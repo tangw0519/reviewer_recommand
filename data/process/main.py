@@ -2,6 +2,8 @@ import json
 import math
 import os
 
+import pandas as pd
+
 from utils import *
 
 
@@ -40,17 +42,18 @@ class Dataset:
                 weight += math.pow(namuda, j - 1) * math.exp(zi / mu)
             arr.append({'pr': review['pr'], 'reviewer': review['reviewer'], 'weight': weight})
         arr = [x for x in arr if x['weight'] != 0]
-        print(arr)
         return arr
 
     def get_pr_reviewer_edges(self, namuda):
         with open(self.path, 'r') as f:
             prs = json.load(f)
-        edge_path = self.new_path + 'pr_reviewer_edge.txt'
+        edge_path = self.new_path + 'pr_reviewer_edge.csv'
         if os.path.exists(edge_path):
             os.remove(edge_path)
-        file = open(edge_path, 'w', encoding='utf-8')
-        file.writelines(['pr\t', 'reviewer\t', 'weight\n'])
+        df = pd.DataFrame()
+        pr_csv = []
+        user_csv = []
+        weight_csv = []
         for pr in prs:
             if self.is_range(pr['created_at']) and 'reviewData' in pr:
                 review_arr = []
@@ -59,9 +62,14 @@ class Dataset:
                                        'review_time': review['created_at']})
                 review_arr = self.get_pr_reviewer_weight(namuda, review_arr)
                 for edge in review_arr:
-                    file.writelines(
-                        [str(edge['pr']) + '\t', str(edge['reviewer']) + '\t', str(edge['weight']) + '\n'])
-        file.close()
+                    pr_csv.append(edge['pr'])
+                    user_csv.append(edge['reviewer'])
+                    weight_csv.append(edge['weight'])
+        df['pr'] = pr_csv
+        df['reviewer'] = user_csv
+        df['weight'] = weight_csv
+        df.to_csv(edge_path, columns=['pr', 'reviewer', 'weight'], index=False, header=True,
+                  sep=',')
 
     # pr-commit
     def get_pr_committer_weight(self, r_time):
@@ -72,11 +80,13 @@ class Dataset:
     def get_pr_committer_edges(self):
         with open(self.path, 'r') as f:
             prs = json.load(f)
-        edge_path = self.new_path + 'pr_committer_edge.txt'
+        edge_path = self.new_path + 'pr_committer_edge.csv'
         if os.path.exists(edge_path):
             os.remove(edge_path)
-        file = open(edge_path, 'w', encoding='utf-8')
-        file.writelines(['pr\t', 'committer\t', 'weight\n'])
+        df = pd.DataFrame()
+        pr_csv = []
+        user_csv = []
+        weight_csv = []
         for pr in prs:
             if self.is_range(pr['created_at']) and 'commitData' in pr:
                 arr = []
@@ -85,9 +95,14 @@ class Dataset:
                     arr.append({'pr': pr['number'], 'committer': commit['commit_author_name'], 'weight': weight})
                 arr = delete_same_commit(arr)
                 for edge in arr:
-                    file.writelines(
-                        [str(edge['pr']) + '\t', str(edge['committer']) + '\t', str(edge['weight']) + '\n'])
-        file.close()
+                    pr_csv.append(edge['pr'])
+                    user_csv.append(edge['committer'])
+                    weight_csv.append(edge['weight'])
+        df['pr'] = pr_csv
+        df['committer'] = user_csv
+        df['weight'] = weight_csv
+        df.to_csv(edge_path, columns=['pr', 'committer', 'weight'], index=False, header=True,
+                          sep=',')
 
     # pr-comment
     def get_pr_commenter_weight(self, namuda, comment_arr):
@@ -109,11 +124,13 @@ class Dataset:
     def get_pr_commenter_edges(self, namuda):
         with open(self.path, 'r') as f:
             prs = json.load(f)
-        edge_path = self.new_path + 'pr_commenter_edge.txt'
+        edge_path = self.new_path + 'pr_commenter_edge.csv'
         if os.path.exists(edge_path):
             os.remove(edge_path)
-        file = open(edge_path, 'w', encoding='utf-8')
-        file.writelines(['pr\t', 'commenter\t', 'weight\n'])
+        df = pd.DataFrame()
+        pr_csv = []
+        user_csv = []
+        weight_csv = []
 
         for pr in prs:
             if self.is_range(pr['created_at']) and 'commentData' in pr:
@@ -123,10 +140,14 @@ class Dataset:
                                         'comment_time': comment['created_at']})
                 comment_arr = self.get_pr_commenter_weight(namuda, comment_arr)
                 for edge in comment_arr:
-                    file.writelines(
-                        [str(edge['pr']) + '\t', str(edge['commenter']) + '\t', str(edge['weight']) + '\n'])
-
-        file.close()
+                    pr_csv.append(edge['pr'])
+                    user_csv.append(edge['commenter'])
+                    weight_csv.append(edge['weight'])
+        df['pr'] = pr_csv
+        df['commenter'] = user_csv
+        df['weight'] = weight_csv
+        df.to_csv(edge_path, columns=['pr', 'commenter', 'weight'], index=False, header=True,
+                          sep=',')
 
     # pr-pr
     def get_pr_pr_weight(self, pr1, pr2):
@@ -152,11 +173,13 @@ class Dataset:
     def get_pr_pr_edges(self, top_m):
         with open(self.path, 'r') as f:
             prs = json.load(f)
-        edge_path = self.new_path + 'pr_pr_edge.txt'
+        edge_path = self.new_path + 'pr_pr_edge.csv'
         if os.path.exists(edge_path):
             os.remove(edge_path)
-        file = open(edge_path, 'w', encoding='utf-8')
-        file.writelines(['pr1\t', 'pr2\t', 'weight\n'])
+        df = pd.DataFrame()
+        pr1_csv = []
+        pr2_csv = []
+        weight_csv = []
         for pr1 in prs:
             if self.is_range(pr1['created_at']) and 'files_detail' in pr1:
                 print(pr1['created_at'])
@@ -167,13 +190,18 @@ class Dataset:
                         neighbour.append({'pr1': pr1['number'], 'pr2': pr2['number'], 'weight': weight})
                 neighbour = sorted(neighbour, key=lambda pr: pr['weight'], reverse=True)[0:top_m]
                 for edge in neighbour:
-                    file.writelines(
-                        [str(edge['pr1']) + '\t', str(edge['pr2']) + '\t', str(edge['weight']) + '\n'])
-        file.close()
+                    pr1_csv.append(edge['pr1'])
+                    pr2_csv.append(edge['pr2'])
+                    weight_csv.append(edge['weight'])
+        df['pr1'] = pr1_csv
+        df['pr2'] = pr2_csv
+        df['weight'] = weight_csv
+        df.to_csv(edge_path, columns=['pr1', 'pr2', 'weight'], index=False, header=True,
+                          sep=',')
 
 
 d = Dataset('bitcoin', '2017-01-01T00:00:00Z', '2020-06-30T00:00:00Z')
-# d.get_pr_reviewer_edges(0.5)
-# d.get_pr_committer_edges()
-# d.get_pr_commenter_edges(0.5)
+d.get_pr_reviewer_edges(0.5)
+d.get_pr_committer_edges()
+d.get_pr_commenter_edges(0.5)
 # d.get_pr_pr_edges(5)
