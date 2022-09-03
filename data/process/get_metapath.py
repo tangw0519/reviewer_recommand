@@ -1,9 +1,8 @@
 import json
 import math
 import os
-
-import pandas as pd
-
+import shutil
+from data.process.get_edge import Edge
 from utils import *
 
 
@@ -52,12 +51,12 @@ class MetaPath:
         pr2_csv = []
         weight_csv = []
         for pr1 in prs:
-            if self.is_range(pr1['created_at']) and 'reviewData' in pr1 and 'commitData' in pr1:
+            if self.is_range(pr1['created_at']) and 'reviewData' in pr1 and 'commitData' in pr1 and len(pr1['reviewData']) !=0:
                 print(pr1['created_at'])
                 neighbour = []
                 for pr2 in prs:
                     if pr2['number'] != pr1['number'] and self.is_range(
-                            pr2['created_at']) and 'commitData' in pr2 and 'reviewData' in pr2:
+                            pr2['created_at']) and 'commitData' in pr2 and 'reviewData' in pr2 and len(pr2['reviewData']) !=0:
                         weight = self.get_pr_commit_pr_weight(pr1, pr2)
                         neighbour.append({'pr1': pr1['number'], 'pr2': pr2['number'], 'weight': weight})
                 neighbour = sorted(neighbour, key=lambda pr: pr['weight'], reverse=True)[0:top_m]
@@ -71,6 +70,14 @@ class MetaPath:
         df.to_csv(edge_path, columns=['pr1', 'pr2', 'weight'], index=False, header=True,
                       sep=',')
 
-
-m = MetaPath('bitcoin', '2017-01-01T00:00:00Z', '2020-06-30T00:00:00Z')
-m.get_pr_commit_pr(5)
+    def get_pr_path_pr(self):
+        edge_path = self.new_path + 'pr_commit_pr_edge.csv'
+        if os.path.exists(edge_path):
+            os.remove(edge_path)
+        old_path = '../%s/edge/pr_pr_edge.csv'%self.name
+        if os.path.exists(old_path):
+            shutil.copyfile(old_path,edge_path)
+        else:
+            d = Edge(self.name,self.start,self.end)
+            d.get_pr_pr_edges()
+            shutil.copyfile(old_path, edge_path)

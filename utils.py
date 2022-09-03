@@ -5,12 +5,15 @@ import numpy as np
 import os
 import pickle
 import random
+
+import pandas as pd
 import torch
 
 from dgl.data.utils import download, get_download_dir, _get_dgl_url
 from pprint import pprint
 from scipy import sparse
 from scipy import io as sio
+
 
 def set_random_seed(seed=0):
     """Set random seed.
@@ -24,6 +27,7 @@ def set_random_seed(seed=0):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+
 
 def mkdir_p(path, log=True):
     """Create a directory for the specified path.
@@ -44,6 +48,7 @@ def mkdir_p(path, log=True):
         else:
             raise
 
+
 def get_date_postfix():
     """Get a date based postfix for directory name.
     Returns
@@ -55,6 +60,7 @@ def get_date_postfix():
         dt.date(), dt.hour, dt.minute, dt.second)
 
     return post_fix
+
 
 def setup_log_dir(args, sampling=False):
     """Name and create directory for logging.
@@ -80,11 +86,13 @@ def setup_log_dir(args, sampling=False):
     mkdir_p(log_dir)
     return log_dir
 
+
 # The configuration below is from the paper.
 default_configure = {
-    'lr': 0.005,             # Learning rate
-    'num_heads': [8],        # Number of attention heads for node-level attention
-    'hidden_units': 8,
+    'lr': 0.005,  # Learning rate
+    'num_heads': [8],  # Number of attention heads for node-level attention
+    # 'hidden_units': 8,
+    'hidden_units': 256,
     'dropout': 0.6,
     'weight_decay': 0.001,
     'num_epochs': 200,
@@ -95,13 +103,16 @@ sampling_configure = {
     'batch_size': 20
 }
 
+
 def setup(args):
     args.update(default_configure)
     set_random_seed(args['seed'])
-    args['dataset'] = 'ACMRaw' if args['hetero'] else 'ACM'
+    args['dataset'] = 'bitcoin'
+    # args['dataset'] = 'ACMRaw' if args['hetero'] else 'ACM'
     args['device'] = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     args['log_dir'] = setup_log_dir(args)
     return args
+
 
 def setup_for_sampling(args):
     args.update(default_configure)
@@ -111,10 +122,12 @@ def setup_for_sampling(args):
     args['log_dir'] = setup_log_dir(args, sampling=True)
     return args
 
+
 def get_binary_mask(total_size, indices):
     mask = torch.zeros(total_size)
     mask[indices] = 1
     return mask.byte()
+
 
 def load_acm(remove_self_loop):
     url = 'dataset/ACM3025.pkl'
@@ -160,6 +173,7 @@ def load_acm(remove_self_loop):
     return gs, features, labels, num_classes, train_idx, val_idx, test_idx, \
            train_mask, val_mask, test_mask
 
+
 def load_acm_raw(remove_self_loop):
     assert not remove_self_loop
     url = 'dataset/ACM.mat'
@@ -167,10 +181,10 @@ def load_acm_raw(remove_self_loop):
     download(_get_dgl_url(url), path=data_path)
 
     data = sio.loadmat(data_path)
-    p_vs_l = data['PvsL']       # paper-field?
-    p_vs_a = data['PvsA']       # paper-author
-    p_vs_t = data['PvsT']       # paper-term, bag of words
-    p_vs_c = data['PvsC']       # paper-conference, labels come from that
+    p_vs_l = data['PvsL']  # paper-field?
+    p_vs_a = data['PvsA']  # paper-author
+    p_vs_t = data['PvsT']  # paper-term, bag of words
+    p_vs_c = data['PvsC']  # paper-conference, labels come from that
 
     # We assign
     # (1) KDD papers as class 0 (data mining),
@@ -217,15 +231,103 @@ def load_acm_raw(remove_self_loop):
     test_mask = get_binary_mask(num_nodes, test_idx)
 
     return hg, features, labels, num_classes, train_idx, val_idx, test_idx, \
-            train_mask, val_mask, test_mask
+           train_mask, val_mask, test_mask
+
+
+def load_self_data(remove_self_loop):
+    data_path = 'data/bitcoin/'
+    data = {}
+
+    features_raw = np.genfromtxt(data_path + 'features/pr_features.csv', delimiter=',')
+    features = torch.from_numpy(features_raw[:, 1:]).float()
+    index_arr = list(np.array(features_raw[:, 0], dtype=int))
+
+    labels_raw = np.genfromtxt(data_path + 'features/pr_labels_test.csv', delimiter=',')
+    labels = torch.from_numpy(labels_raw[:, -1]).long()
+    num_classes = len(list(set(labels_raw[:, -1])))
+
+    path_edge = np.genfromtxt(data_path + 'metapath/pr_path_pr_edge.csv', delimiter=',', skip_header=True)
+    path_edge = path_edge[:, 0:2]
+    indices = []
+    path_value = []
+    pr1_index_count = [0] * labels.shape[0]
+    for x in path_edge:
+        pr1_index_count[index_arr.index(int(x[0]))] += 1
+        indices.append(index_arr.index(int(x[1])))
+        path_value.append(1)
+    indices = np.array(indices)
+    path_value = np.array(path_value, dtype=float)
+
+    indptr = [0]
+    for x in pr1_index_count:
+        indptr.append(indptr[len(indptr) - 1] + x)
+    indptr = np.array(indptr)
+    data['path'] = sparse.csr_matrix((path_value, indices, indptr), shape=(labels.shape[0], labels.shape[0]))
+
+    commit_edge = np.genfromtxt(data_path + 'metapath/pr_commit_pr_edge.csv', delimiter=',', skip_header=True)
+    commit_edge = commit_edge[:, 0:2]
+    indices = []
+    commit_value = []
+    pr1_index_count = [0] * labels.shape[0]
+    for x in commit_edge:
+        pr1_index_count[index_arr.index(int(x[0]))] += 1
+        indices.append(index_arr.index(int(x[1])))
+        commit_value.append(1)
+    indices = np.array(indices)
+    commit_value = np.array(commit_value, dtype=float)
+
+    indptr = [0]
+    for x in pr1_index_count:
+        indptr.append(indptr[len(indptr) - 1] + x)
+    indptr = np.array(indptr)
+
+    data['commit'] = sparse.csr_matrix((commit_value, indices, indptr), shape=(labels.shape[0], labels.shape[0]))
+    if not remove_self_loop:
+        num_nodes = labels.shape[0]
+        data['path'] = sparse.csr_matrix(data['path'] + np.eye(num_nodes))
+        data['commit'] = sparse.csr_matrix(data['commit'] + np.eye(num_nodes))
+
+    # Adjacency matrices for meta path based neighbors
+    # (Mufei): I verified both of them are binary adjacency matrices with self loops
+    path_g = dgl.from_scipy(data['path'])
+    commit_g = dgl.from_scipy(data['commit'])
+    gs = [path_g, commit_g]
+
+    shuffled_index = np.random.permutation(labels.shape[0])
+    data['train_idx'] = shuffled_index[:1000]
+    data['val_idx'] = shuffled_index[1000:1500]
+    data['test_idx'] = shuffled_index[1500:]
+    train_idx = torch.from_numpy(data['train_idx']).long().squeeze(0)
+    val_idx = torch.from_numpy(data['val_idx']).long().squeeze(0)
+    test_idx = torch.from_numpy(data['test_idx']).long().squeeze(0)
+
+    num_nodes = path_g.number_of_nodes()
+    train_mask = get_binary_mask(num_nodes, train_idx)
+    val_mask = get_binary_mask(num_nodes, val_idx)
+    test_mask = get_binary_mask(num_nodes, test_idx)
+
+    print('dataset loaded')
+    pprint({
+        'dataset': 'bitcoin',
+        'train': train_mask.sum().item() / num_nodes,
+        'val': val_mask.sum().item() / num_nodes,
+        'test': test_mask.sum().item() / num_nodes
+    })
+
+    return gs, features, labels, num_classes, train_idx, val_idx, test_idx, \
+           train_mask, val_mask, test_mask
+
 
 def load_data(dataset, remove_self_loop=False):
     if dataset == 'ACM':
         return load_acm(remove_self_loop)
     elif dataset == 'ACMRaw':
         return load_acm_raw(remove_self_loop)
+    elif dataset == 'bitcoin':
+        return load_self_data(remove_self_loop)
     else:
         return NotImplementedError('Unsupported dataset {}'.format(dataset))
+
 
 class EarlyStopping(object):
     def __init__(self, patience=10):

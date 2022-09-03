@@ -169,4 +169,7 @@ def get_similarity_user(arr1, arr2):
     len_min = min(len1, len2)
     arr = list(set(arr1 + arr2))
     lcp = len(arr) - len_min
-    return lcp / len_max
+    if len_max != 0:
+        return lcp / len_max
+    else:
+        return 0

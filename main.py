@@ -89,8 +89,8 @@ def main(args):
 
     stopper.load_checkpoint(model)
     test_loss, test_acc, test_micro_f1, test_macro_f1 = evaluate(model, g, features, labels, test_mask, loss_fcn)
-    print('Test loss {:.4f} | Test Micro f1 {:.4f} | Test Macro f1 {:.4f}'.format(
-        test_loss.item(), test_micro_f1, test_macro_f1))
+    print('Test loss {:.4f} | Test Acc {:.4f} | Test Micro f1 {:.4f} | Test Macro f1 {:.4f}'.format(
+        test_loss.item(), test_acc, test_micro_f1, test_macro_f1))
 
 
 if __name__ == '__main__':

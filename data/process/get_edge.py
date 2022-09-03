@@ -51,7 +51,7 @@ class Edge:
         user_csv = []
         weight_csv = []
         for pr in prs:
-            if self.is_range(pr['created_at']) and 'reviewData' in pr:
+            if self.is_range(pr['created_at']) and 'reviewData' in pr  and len(pr['reviewData']) !=0:
                 review_arr = []
                 for review in pr['reviewData']:
                     review_arr.append({'pr': pr['number'], 'reviewer': review['review_comment_creator'],
@@ -84,7 +84,7 @@ class Edge:
         user_csv = []
         weight_csv = []
         for pr in prs:
-            if self.is_range(pr['created_at']) and 'commitData' in pr and 'reviewData' in pr:
+            if self.is_range(pr['created_at']) and 'commitData' in pr and 'reviewData' in pr  and len(pr['reviewData']) !=0:
                 arr = []
                 for commit in pr['commitData']:
                     weight = self.get_pr_committer_weight(commit['commit_author_date'])
@@ -129,7 +129,7 @@ class Edge:
         weight_csv = []
 
         for pr in prs:
-            if self.is_range(pr['created_at']) and 'commentData' in pr and 'reviewData' in pr:
+            if self.is_range(pr['created_at']) and 'commentData' in pr and 'reviewData' in pr  and len(pr['reviewData']) !=0:
                 comment_arr = []
                 for comment in pr['commentData']:
                     comment_arr.append({'pr': pr['number'], 'commenter': comment['comment_creator'],
@@ -177,12 +177,12 @@ class Edge:
         pr2_csv = []
         weight_csv = []
         for pr1 in prs:
-            if self.is_range(pr1['created_at']) and 'files_detail' in pr1 and 'reviewData' in pr1:
+            if self.is_range(pr1['created_at']) and 'files_detail' in pr1 and 'reviewData' in pr1 and len(pr1['reviewData']) !=0:
                 print(pr1['created_at'])
                 neighbour = []
                 for pr2 in prs:
                     if pr2['number'] != pr1['number'] and self.is_range(
-                            pr2['created_at']) and 'files_detail' in pr2 and 'reviewData' in pr2:
+                            pr2['created_at']) and 'files_detail' in pr2 and 'reviewData' in pr2 and len(pr2['reviewData']) !=0:
                         weight = self.get_pr_pr_weight(pr1, pr2)
                         neighbour.append({'pr1': pr1['number'], 'pr2': pr2['number'], 'weight': weight})
                 neighbour = sorted(neighbour, key=lambda pr: pr['weight'], reverse=True)[0:top_m]
