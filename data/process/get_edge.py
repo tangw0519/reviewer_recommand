@@ -9,8 +9,12 @@ class Edge:
         default_start, default_end = get_default_time(self.name)
         self.start = start or default_start
         self.end = end or default_end
+        print(f'当前项目：{self.name}')
+        print(f'当前时间范围：{self.start} ~ {self.end}')
+        self.filename_prefix = start.split('T')[0]
+        self.filename_suffix = end.split('T')[0]
         self.path = '../../resource/%s/%sFilterPrData.json' % (self.name, self.name)
-        self.new_path = '../%s/edge/' % self.name
+        self.new_path = f'../{self.name}/edge/{self.filename_prefix}-to-{self.filename_suffix}/'
         if not os.path.exists(self.new_path):
             os.makedirs(self.new_path)
 
@@ -18,6 +22,15 @@ class Edge:
         t = get_unix(t)
         start = get_unix(self.start)
         end = get_unix(self.end)
+        if start <= t <= end:
+            return True
+        else:
+            return False
+
+    def is_time_before_pr1(self, t, t_end):
+        t = get_unix(t)
+        start = get_unix(self.start)
+        end = get_unix(t_end)
         if start <= t <= end:
             return True
         else:
@@ -41,6 +54,7 @@ class Edge:
         return arr
 
     def get_pr_reviewer_edges(self, namuda):
+        print(f'当前操作：获取{self.name}的pr与其reviewer连边，参数namuda：{namuda}')
         with open(self.path, 'r') as f:
             prs = json.load(f)
         edge_path = self.new_path + 'pr_reviewer_edge.csv'
@@ -51,7 +65,7 @@ class Edge:
         user_csv = []
         weight_csv = []
         for pr in prs:
-            if self.is_range(pr['created_at']) and 'reviewData' in pr  and len(pr['reviewData']) !=0:
+            if self.is_range(pr['created_at']) and 'reviewData' in pr and len(pr['reviewData']) != 0:
                 review_arr = []
                 for review in pr['reviewData']:
                     review_arr.append({'pr': pr['number'], 'reviewer': review['review_comment_creator'],
@@ -74,6 +88,7 @@ class Edge:
         return dis2 / dis1
 
     def get_pr_committer_edges(self):
+        print(f'当前操作：获取{self.name}的pr与其committer连边')
         with open(self.path, 'r') as f:
             prs = json.load(f)
         edge_path = self.new_path + 'pr_committer_edge.csv'
@@ -84,7 +99,8 @@ class Edge:
         user_csv = []
         weight_csv = []
         for pr in prs:
-            if self.is_range(pr['created_at']) and 'commitData' in pr and 'reviewData' in pr  and len(pr['reviewData']) !=0:
+            if self.is_range(pr['created_at']) and 'commitData' in pr and 'reviewData' in pr and len(
+                    pr['reviewData']) != 0:
                 arr = []
                 for commit in pr['commitData']:
                     weight = self.get_pr_committer_weight(commit['commit_author_date'])
@@ -118,6 +134,7 @@ class Edge:
         return arr
 
     def get_pr_commenter_edges(self, namuda):
+        print(f'当前操作：获取{self.name}的pr与其commenter连边，参数namuda：{namuda}')
         with open(self.path, 'r') as f:
             prs = json.load(f)
         edge_path = self.new_path + 'pr_commenter_edge.csv'
@@ -129,7 +146,8 @@ class Edge:
         weight_csv = []
 
         for pr in prs:
-            if self.is_range(pr['created_at']) and 'commentData' in pr and 'reviewData' in pr  and len(pr['reviewData']) !=0:
+            if self.is_range(pr['created_at']) and 'commentData' in pr and 'reviewData' in pr and len(
+                    pr['reviewData']) != 0:
                 comment_arr = []
                 for comment in pr['commentData']:
                     comment_arr.append({'pr': pr['number'], 'commenter': comment['comment_creator'],
@@ -157,7 +175,7 @@ class Edge:
             weight = 0
             t1 = pr1['created_at']
             t2 = pr2['created_at']
-            zi = abs(get_unix_distance(t1, t2))
+            zi = abs(get_unix_distance(t2, t1))
             mu = get_unix_distance(self.start, self.end)
             for f1 in path1:
                 for f2 in path2:
@@ -167,6 +185,7 @@ class Edge:
             return 0
 
     def get_pr_pr_edges(self, top_m):
+        print(f'当前操作：获取{self.name}在path方面相关的前{top_m}条pr连边')
         with open(self.path, 'r') as f:
             prs = json.load(f)
         edge_path = self.new_path + 'pr_pr_edge.csv'
@@ -177,23 +196,26 @@ class Edge:
         pr2_csv = []
         weight_csv = []
         for pr1 in prs:
-            if self.is_range(pr1['created_at']) and 'files_detail' in pr1 and 'reviewData' in pr1 and len(pr1['reviewData']) !=0:
+            if self.is_range(pr1['created_at']) and 'files_detail' in pr1 and 'reviewData' in pr1 and len(
+                    pr1['reviewData']) != 0:
                 print(pr1['created_at'])
                 neighbour = []
                 for pr2 in prs:
-                    if pr2['number'] != pr1['number'] and self.is_range(
-                            pr2['created_at']) and 'files_detail' in pr2 and 'reviewData' in pr2 and len(pr2['reviewData']) !=0:
+                    if pr2['number'] != pr1['number'] and self.is_time_before_pr1(
+                            pr2['created_at'],
+                            pr1['created_at']) and 'files_detail' in pr2 and 'reviewData' in pr2 and len(
+                        pr2['reviewData']) != 0:
                         weight = self.get_pr_pr_weight(pr1, pr2)
                         neighbour.append({'pr1': pr1['number'], 'pr2': pr2['number'], 'weight': weight})
                 neighbour = sorted(neighbour, key=lambda pr: pr['weight'], reverse=True)[0:top_m]
+
                 for edge in neighbour:
-                    pr1_csv.append(edge['pr1'])
-                    pr2_csv.append(edge['pr2'])
-                    weight_csv.append(edge['weight'])
+                    if edge['weight'] > 0:
+                        pr1_csv.append(edge['pr1'])
+                        pr2_csv.append(edge['pr2'])
+                        weight_csv.append(edge['weight'])
         df['pr1'] = pr1_csv
         df['pr2'] = pr2_csv
         df['weight'] = weight_csv
         df.to_csv(edge_path, columns=['pr1', 'pr2', 'weight'], index=False, header=True,
                   sep=',')
-
-

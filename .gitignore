@@ -7,3 +7,4 @@ dataProcess/textData/__pycache__/labelTrans.cpython-39.pyc
 *.pyc
 dataProcess/textData/__pycache__/TextCleaner.cpython-39.pyc
 dataProcess/textData/__pycache__/timeTrans.cpython-39.pyc
+/result/

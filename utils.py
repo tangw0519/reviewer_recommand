@@ -14,6 +14,40 @@ from pprint import pprint
 from scipy import sparse
 from scipy import io as sio
 
+# The configuration below is from the paper.
+default_configure = {
+    'lr': 0.005,  # Learning rate
+    'num_heads': [8],  # Number of attention heads for node-level attention
+    # 'hidden_units': 8,
+    'hidden_units': 512,
+    'dropout': 0.6,
+    'weight_decay': 0.001,
+    'num_epochs': 200,
+    'patience': 100
+}
+
+
+def setup(args):
+    args.update(default_configure)
+    set_random_seed(args['seed'])
+    args['dataset'] = 'bitcoin'
+    args['start_time'] = '2017-01-01'
+    args['end_time'] = '2020-06-30'
+    args['device'] = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    args['log_dir'] = setup_log_dir(args)
+    return args
+
+
+sampling_configure = {
+    'batch_size': 20
+}
+datasets = ['bitcoin',
+            'scikit-learn',
+            'react',
+            'node',
+            'tensorflow'
+            ]
+
 
 def set_random_seed(seed=0):
     """Set random seed.
@@ -83,35 +117,8 @@ def setup_log_dir(args, sampling=False):
     if sampling:
         log_dir = log_dir + '_sampling'
 
-    mkdir_p(log_dir)
+    # mkdir_p(log_dir)
     return log_dir
-
-
-# The configuration below is from the paper.
-default_configure = {
-    'lr': 0.005,  # Learning rate
-    'num_heads': [8],  # Number of attention heads for node-level attention
-    # 'hidden_units': 8,
-    'hidden_units': 256,
-    'dropout': 0.6,
-    'weight_decay': 0.001,
-    'num_epochs': 200,
-    'patience': 100
-}
-
-sampling_configure = {
-    'batch_size': 20
-}
-
-
-def setup(args):
-    args.update(default_configure)
-    set_random_seed(args['seed'])
-    args['dataset'] = 'bitcoin'
-    # args['dataset'] = 'ACMRaw' if args['hetero'] else 'ACM'
-    args['device'] = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-    args['log_dir'] = setup_log_dir(args)
-    return args
 
 
 def setup_for_sampling(args):
@@ -129,132 +136,23 @@ def get_binary_mask(total_size, indices):
     return mask.byte()
 
 
-def load_acm(remove_self_loop):
-    url = 'dataset/ACM3025.pkl'
-    data_path = get_download_dir() + '/ACM3025.pkl'
-    # download(_get_dgl_url(url), path=data_path)
-
-    with open(data_path, 'rb') as f:
-        data = pickle.load(f)
-
-    labels, features = torch.from_numpy(data['label'].todense()).long(), \
-                       torch.from_numpy(data['feature'].todense()).float()
-    num_classes = labels.shape[1]
-    labels = labels.nonzero()[:, 1]
-
-    if remove_self_loop:
-        num_nodes = data['label'].shape[0]
-        data['PAP'] = sparse.csr_matrix(data['PAP'] - np.eye(num_nodes))
-        data['PLP'] = sparse.csr_matrix(data['PLP'] - np.eye(num_nodes))
-
-    # Adjacency matrices for meta path based neighbors
-    # (Mufei): I verified both of them are binary adjacency matrices with self loops
-    author_g = dgl.from_scipy(data['PAP'])
-    subject_g = dgl.from_scipy(data['PLP'])
-    gs = [author_g, subject_g]
-
-    train_idx = torch.from_numpy(data['train_idx']).long().squeeze(0)
-    val_idx = torch.from_numpy(data['val_idx']).long().squeeze(0)
-    test_idx = torch.from_numpy(data['test_idx']).long().squeeze(0)
-
-    num_nodes = author_g.number_of_nodes()
-    train_mask = get_binary_mask(num_nodes, train_idx)
-    val_mask = get_binary_mask(num_nodes, val_idx)
-    test_mask = get_binary_mask(num_nodes, test_idx)
-
-    print('dataset loaded')
-    pprint({
-        'dataset': 'ACM',
-        'train': train_mask.sum().item() / num_nodes,
-        'val': val_mask.sum().item() / num_nodes,
-        'test': test_mask.sum().item() / num_nodes
-    })
-
-    return gs, features, labels, num_classes, train_idx, val_idx, test_idx, \
-           train_mask, val_mask, test_mask
-
-
-def load_acm_raw(remove_self_loop):
-    assert not remove_self_loop
-    url = 'dataset/ACM.mat'
-    data_path = get_download_dir() + '/ACM.mat'
-    download(_get_dgl_url(url), path=data_path)
-
-    data = sio.loadmat(data_path)
-    p_vs_l = data['PvsL']  # paper-field?
-    p_vs_a = data['PvsA']  # paper-author
-    p_vs_t = data['PvsT']  # paper-term, bag of words
-    p_vs_c = data['PvsC']  # paper-conference, labels come from that
-
-    # We assign
-    # (1) KDD papers as class 0 (data mining),
-    # (2) SIGMOD and VLDB papers as class 1 (database),
-    # (3) SIGCOMM and MOBICOMM papers as class 2 (communication)
-    conf_ids = [0, 1, 9, 10, 13]
-    label_ids = [0, 1, 2, 2, 1]
-
-    p_vs_c_filter = p_vs_c[:, conf_ids]
-    p_selected = (p_vs_c_filter.sum(1) != 0).A1.nonzero()[0]
-    p_vs_l = p_vs_l[p_selected]
-    p_vs_a = p_vs_a[p_selected]
-    p_vs_t = p_vs_t[p_selected]
-    p_vs_c = p_vs_c[p_selected]
-
-    hg = dgl.heterograph({
-        ('paper', 'pa', 'author'): p_vs_a.nonzero(),
-        ('author', 'ap', 'paper'): p_vs_a.transpose().nonzero(),
-        ('paper', 'pf', 'field'): p_vs_l.nonzero(),
-        ('field', 'fp', 'paper'): p_vs_l.transpose().nonzero()
-    })
-
-    features = torch.FloatTensor(p_vs_t.toarray())
-
-    pc_p, pc_c = p_vs_c.nonzero()
-    labels = np.zeros(len(p_selected), dtype=np.int64)
-    for conf_id, label_id in zip(conf_ids, label_ids):
-        labels[pc_p[pc_c == conf_id]] = label_id
-    labels = torch.LongTensor(labels)
-
-    num_classes = 3
-
-    float_mask = np.zeros(len(pc_p))
-    for conf_id in conf_ids:
-        pc_c_mask = (pc_c == conf_id)
-        float_mask[pc_c_mask] = np.random.permutation(np.linspace(0, 1, pc_c_mask.sum()))
-    train_idx = np.where(float_mask <= 0.2)[0]
-    val_idx = np.where((float_mask > 0.2) & (float_mask <= 0.3))[0]
-    test_idx = np.where(float_mask > 0.3)[0]
-
-    num_nodes = hg.number_of_nodes('paper')
-    train_mask = get_binary_mask(num_nodes, train_idx)
-    val_mask = get_binary_mask(num_nodes, val_idx)
-    test_mask = get_binary_mask(num_nodes, test_idx)
-
-    return hg, features, labels, num_classes, train_idx, val_idx, test_idx, \
-           train_mask, val_mask, test_mask
-
-
-def load_self_data(remove_self_loop):
-    data_path = 'data/bitcoin/'
-    data = {}
-
-    features_raw = np.genfromtxt(data_path + 'features/pr_features.csv', delimiter=',')
-    features = torch.from_numpy(features_raw[:, 1:]).float()
-    index_arr = list(np.array(features_raw[:, 0], dtype=int))
-
-    labels_raw = np.genfromtxt(data_path + 'features/pr_labels_test.csv', delimiter=',')
-    labels = torch.from_numpy(labels_raw[:, -1]).long()
-    num_classes = len(list(set(labels_raw[:, -1])))
-
-    path_edge = np.genfromtxt(data_path + 'metapath/pr_path_pr_edge.csv', delimiter=',', skip_header=True)
+def get_metapath(dataset, index_arr, path_name, node_num, start_time, end_time):
+    data_path = f'data/{dataset}/'
+    path_edge = np.genfromtxt(data_path + f'metapath/{start_time}-to-{end_time}/pr_{path_name}_pr_edge.csv',
+                              delimiter=',',
+                              skip_header=True)
+    path_weight = path_edge[:, -1]
     path_edge = path_edge[:, 0:2]
+
     indices = []
     path_value = []
-    pr1_index_count = [0] * labels.shape[0]
+    pr1_index_count = [0] * node_num
+    k = 0
     for x in path_edge:
         pr1_index_count[index_arr.index(int(x[0]))] += 1
         indices.append(index_arr.index(int(x[1])))
-        path_value.append(1)
+        path_value.append(path_weight[k])
+        k += 1
     indices = np.array(indices)
     path_value = np.array(path_value, dtype=float)
 
@@ -262,69 +160,89 @@ def load_self_data(remove_self_loop):
     for x in pr1_index_count:
         indptr.append(indptr[len(indptr) - 1] + x)
     indptr = np.array(indptr)
-    data['path'] = sparse.csr_matrix((path_value, indices, indptr), shape=(labels.shape[0], labels.shape[0]))
+    return sparse.csr_matrix((path_value, indices, indptr), shape=(node_num, node_num))
 
-    commit_edge = np.genfromtxt(data_path + 'metapath/pr_commit_pr_edge.csv', delimiter=',', skip_header=True)
-    commit_edge = commit_edge[:, 0:2]
-    indices = []
-    commit_value = []
-    pr1_index_count = [0] * labels.shape[0]
-    for x in commit_edge:
-        pr1_index_count[index_arr.index(int(x[0]))] += 1
-        indices.append(index_arr.index(int(x[1])))
-        commit_value.append(1)
-    indices = np.array(indices)
-    commit_value = np.array(commit_value, dtype=float)
 
-    indptr = [0]
-    for x in pr1_index_count:
-        indptr.append(indptr[len(indptr) - 1] + x)
-    indptr = np.array(indptr)
+def get_train_all_metapath(arr, remove_self_loop, dataset, index_arr, node_num, start_time, end_time):
+    data = {}
+    gs = []
+    for name in arr:
+        data[name] = get_metapath(dataset, index_arr, name, node_num, start_time, end_time)
+        if not remove_self_loop:
+            data[name] = sparse.csr_matrix(data[name] + np.eye(node_num))
+        gs.append(dgl.from_scipy(data[name]))
+    return gs, data
 
-    data['commit'] = sparse.csr_matrix((commit_value, indices, indptr), shape=(labels.shape[0], labels.shape[0]))
-    if not remove_self_loop:
-        num_nodes = labels.shape[0]
-        data['path'] = sparse.csr_matrix(data['path'] + np.eye(num_nodes))
-        data['commit'] = sparse.csr_matrix(data['commit'] + np.eye(num_nodes))
 
-    # Adjacency matrices for meta path based neighbors
-    # (Mufei): I verified both of them are binary adjacency matrices with self loops
-    path_g = dgl.from_scipy(data['path'])
-    commit_g = dgl.from_scipy(data['commit'])
-    gs = [path_g, commit_g]
+def load_self_data(dataset, remove_self_loop, start_time, end_time):
+    data_path = f'data/{dataset}/'
+    if not os.path.exists(data_path + f'features/{start_time}-to-{end_time}') or not os.path.exists(
+            data_path + f'metapath/{start_time}-to-{end_time}'):
+        print('当前数据集尚未process')
+        return
 
+    features_raw = np.genfromtxt(data_path + f'features/{start_time}-to-{end_time}/pr_features.csv', delimiter=',')
+    features = torch.from_numpy(features_raw[:, 1:]).float()
+    index_arr = list(np.array(features_raw[:, 0], dtype=int))
+    # duo biao qian
+    labels_raw = np.genfromtxt(data_path + f'features/{start_time}-to-{end_time}/pr_labels.csv', delimiter=',')
+    labels = torch.from_numpy(labels_raw[:, 1:]).long()
+    num_classes = len(labels_raw[0]) - 1
+
+    loss_self = np.genfromtxt(data_path + f'loss/{start_time}-to-{end_time}/pr_active_1.csv', delimiter=',')
+    loss = torch.from_numpy(loss_self[:, 1:]).float()
+
+    metapath = ['path', 'commit']
+    gs, data = get_train_all_metapath(metapath, remove_self_loop, dataset, index_arr, labels.shape[0], start_time,
+                                      end_time)
+
+    rate1 = int(labels.shape[0] * 0.8)
+    rate2 = int(labels.shape[0] * 0.9)
+    # 打乱，不按时间顺序
     shuffled_index = np.random.permutation(labels.shape[0])
-    data['train_idx'] = shuffled_index[:1000]
-    data['val_idx'] = shuffled_index[1000:1500]
-    data['test_idx'] = shuffled_index[1500:]
+    data['train_idx'] = shuffled_index[:rate1]
+    data['val_idx'] = shuffled_index[rate1:rate2]
+    data['test_idx'] = shuffled_index[rate2:]
+    # 不打乱 按时间来分割
+    # data_index = np.array(list(range(0, labels.shape[0])))
+    # data['train_idx'] = data_index[:rate1]
+    # data['val_idx'] = data_index[rate1:rate2]
+    # data['test_idx'] = data_index[rate2:]
+
     train_idx = torch.from_numpy(data['train_idx']).long().squeeze(0)
     val_idx = torch.from_numpy(data['val_idx']).long().squeeze(0)
     test_idx = torch.from_numpy(data['test_idx']).long().squeeze(0)
 
-    num_nodes = path_g.number_of_nodes()
+    num_nodes = gs[0].number_of_nodes()
     train_mask = get_binary_mask(num_nodes, train_idx)
     val_mask = get_binary_mask(num_nodes, val_idx)
     test_mask = get_binary_mask(num_nodes, test_idx)
 
     print('dataset loaded')
     pprint({
-        'dataset': 'bitcoin',
+        'dataset': dataset,
+        'time_range': start_time + '~' + end_time,
         'train': train_mask.sum().item() / num_nodes,
         'val': val_mask.sum().item() / num_nodes,
-        'test': test_mask.sum().item() / num_nodes
+        'test': test_mask.sum().item() / num_nodes,
+        'classes': num_classes,
+        'pr nodes': labels.shape[0],
+        'pr features': features.shape[1],
+        'metapath': ','.join(metapath)
     })
 
-    return gs, features, labels, num_classes, train_idx, val_idx, test_idx, \
+    return gs, features, labels,loss, num_classes, train_idx, val_idx, test_idx, \
            train_mask, val_mask, test_mask
 
 
-def load_data(dataset, remove_self_loop=False):
-    if dataset == 'ACM':
-        return load_acm(remove_self_loop)
-    elif dataset == 'ACMRaw':
-        return load_acm_raw(remove_self_loop)
-    elif dataset == 'bitcoin':
-        return load_self_data(remove_self_loop)
+def load_data(dataset, remove_self_loop=False, start_time='', end_time=''):
+    # if dataset == 'ACM':
+    #     return load_acm(remove_self_loop)
+    # elif dataset == 'ACMRaw':
+    #     return load_acm_raw(remove_self_loop)
+    # el
+    if dataset in datasets:
+        return load_self_data(dataset, remove_self_loop, start_time, end_time)
     else:
         return NotImplementedError('Unsupported dataset {}'.format(dataset))
 
@@ -332,7 +250,7 @@ def load_data(dataset, remove_self_loop=False):
 class EarlyStopping(object):
     def __init__(self, patience=10):
         dt = datetime.datetime.now()
-        self.filename = 'early_stop_{}_{:02d}-{:02d}-{:02d}.pth'.format(
+        self.filename = 'result/early_stop_{}_{:02d}-{:02d}-{:02d}.pth'.format(
             dt.date(), dt.hour, dt.minute, dt.second)
         self.patience = patience
         self.counter = 0

@@ -83,5 +83,7 @@ class HAN(nn.Module):
     def forward(self, g, h):
         for gnn in self.layers:
             h = gnn(g, h)
-
-        return self.predict(h)
+        # return self.predict(h)
+        res = self.predict(h)
+        max = F.softmax(res, dim=1)
+        return F.log_softmax(res, dim=1)
