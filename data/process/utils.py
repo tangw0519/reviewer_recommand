@@ -1,11 +1,20 @@
 import time
-from datetime import datetime
-import json
+import datetime
 import pandas as pd
 import re
+import json
 from nltk import word_tokenize
 from nltk.stem import WordNetLemmatizer
 from nltk.corpus import stopwords
+
+args = {
+    'dataset': 'bitcoin',
+    'start_time': '2017-01-01T00:00:00Z',
+    'end_time': '2020-06-30T00:00:00Z',
+    'top_m': 5,
+    'namuda': 0.5,
+    'features_len': 500,
+}
 
 
 def get_default_time(name):
@@ -17,10 +26,20 @@ def get_default_time(name):
 
 
 def get_unix(t):
-    time_strip = datetime.strptime(t, '%Y-%m-%dT%H:%M:%SZ')
+    time_strip = datetime.datetime.strptime(t, '%Y-%m-%dT%H:%M:%SZ')
     get_time = time_strip.strftime('%Y-%m-%d %H:%M:%S')
     get_unix_time = int(time.mktime(time.strptime(get_time, "%Y-%m-%d %H:%M:%S")))
     return get_unix_time
+
+
+def is_range_self(start, t, end):
+    t = get_unix(t)
+    start = get_unix(start + 'T00:00:00Z')
+    end = get_unix(end + 'T00:00:00Z')
+    if start <= t <= end:
+        return True
+    else:
+        return False
 
 
 def get_unix_distance(t1, t2):
@@ -169,4 +188,30 @@ def get_similarity_user(arr1, arr2):
     len_min = min(len1, len2)
     arr = list(set(arr1 + arr2))
     lcp = len(arr) - len_min
-    return lcp / len_max
+    if len_max != 0:
+        return lcp / len_max
+    else:
+        return 0
+
+
+def get_time_split(month=3, start=args['start_time'], end=args['end_time']):
+    date_list = []
+    start = start.split('T')[0]
+    end = end.split('T')[0]
+    begin = datetime.datetime.strptime(start, "%Y-%m-%d")  # 也可以使用其他格式，如"%Y-%m-%d"
+    end = datetime.datetime.strptime(end, "%Y-%m-%d")
+    while begin <= end:  # 构建日期列表
+        date_temp = begin.strftime("%Y-%m-%d")  # 把begin赋值给date_temp
+        date_list.append(date_temp)  # 将date_temp加入列表
+        begin += datetime.timedelta(days=30 * month)  # 把begin变为下一个月（用30tin来近似）
+
+    date_list = list(set(date_list))  # 将列表转换为集合，可删除重复元素，然后再转为列表
+    date_list.sort(reverse=False)  # 上一步去重可能会打乱顺序，需要再恢复为升序
+    if date_list[len(date_list) - 1] != end.strftime("%Y-%m-%d"):
+        date_list.append(end.strftime("%Y-%m-%d"))
+
+    time_ranges = []
+    for i in range(len(date_list) - 1):
+        time_ranges.append([date_list[i], date_list[i + 1]])
+    print(f'时间从{start}到{end}按{month}个月(每个月30天)划分得到{len(time_ranges)}组时间')
+    return time_ranges
